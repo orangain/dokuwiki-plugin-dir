@@ -15,6 +15,7 @@
  * - Sebastian Menge
  * - Matthias Schulte
  * - Geert Janssens
+ * - Gerry Weißbach
  */
 
 if(!defined('DOKU_INC')) {
@@ -26,6 +27,7 @@ if(!defined('DOKU_PLUGIN')) {
 
 require_once (DOKU_PLUGIN.'syntax.php');
 require_once (DOKU_INC.'inc/search.php');
+require_once (DOKU_INC.'inc/pageutils.php');
 
 define ("DIR_PLUGIN_PATTERN", "DIR");
 
@@ -54,6 +56,7 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
     var $modeIsLatex = false;
     var $processedLatex = false;
     var $rowNumber = 0;
+    var $ucnames = false;
 
     /**
      * Constructor
@@ -319,7 +322,7 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
 
         $ns = trim($ns, ':');
 
-        $path = $conf ['datadir'].'/'.str_replace(':', '/', $ns);
+        $path = $conf ['datadir'].'/'.utf8_encodeFN(str_replace(':', '/', $ns));
 
         return $path;
     }
@@ -388,8 +391,17 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
                     $key = "namespacename";
                     $val = true;
                     break;
+                case "ucnames":
+                    $this->ucnames = true;
+                    break;
+                    
                 case "debug":
                     $this->debug = true;
+		    break;
+                case  "last":
+		    $key = 'maxrows';
+		    $val = intval($val);
+		    break;
             }
             $this->opts [$key] = $val;
         }
@@ -639,9 +651,21 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
         }
 
         //  $this->_showDebugMsg ("$level $type $ns$id:");
-
+        
+        if($this->ucnames) {
+            $fqid =  str_replace('_'," ",$fqid);
+           // $fqid = ltrim($fqid , ':');  
+            $fqid = preg_replace_callback(
+                '|:\w|',
+                function ($matches) {
+                    return strtoupper($matches[0]);
+                },
+                $fqid
+            );   
+            $fqid = ucwords($fqid);
+        }
         $data [] = array(
-            'id'         => $fqid,
+            'id'         =>  $fqid,
             'type'       => $type,
             'level'      => $level,
             'linkid'     => $linkid,
@@ -810,7 +834,10 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
         }
 
         $this->_sortResult();
-
+	    if ( !empty($this->opts['maxrows']) && $this->opts['maxrows'] > 0 ) {
+		    $this->pages = array_slice($this->pages, 0, $this->opts['maxrows']);
+	    }
+	    
         return true;
     }
 
@@ -930,7 +957,13 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
                 if($spacerWidth > 0) {
                     $this->_put('<div style="margin-left: '.$spacerWidth.'px;">');
                 }
-                $this->_put(html_wikilink($pageid, $name));
+                 
+                if($page ["type"] == 'd' && $this->ucnames) {                   
+                   $dirlnk = html_wikilink($pageid, $name);
+                   $dirlnk = str_replace('wikilink2', 'wikilink',$dirlnk);
+                   $this->_put($dirlnk);
+                }
+                else $this->_put(html_wikilink($pageid, $name));
                 if($spacerWidth > 0) {
                     $this->_put('</div>');
                 }
@@ -1033,8 +1066,10 @@ class syntax_plugin_dir extends DokuWiki_Syntax_Plugin {
      * Rewrite of renderer->table_open () because of class
      */
     function _tableOpen() {
+        $rdr = $this->rdr;
+        $rdr->_counter['row_counter'] = 0;
+        
         if($this->modeIsLatex) {
-            $rdr                    = $this->rdr;
             $rdr->_current_tab_cols = 0;
             if($rdr->info ['usetablefigure'] == "on") {
                 $this->_putCmdNl("begin{figure}[h]");
